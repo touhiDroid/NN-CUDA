@@ -1,0 +1,7 @@
+.idea
+*.o
+*.json
+*.json.gz
+*.csv
+*.csv.zip
+venv
