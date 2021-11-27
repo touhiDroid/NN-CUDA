@@ -1,5 +1,7 @@
-todo: main
-main: main.cu
-	nvcc main.cu -o main.o
+todo: sequential cuda
+sequential: main.cpp
+	g++ main.cpp -o sequential.o
+cuda: main.cu
+	nvcc main.cu -o cuda.o
 clean:
-	rm main.o
+	rm sequential.o cuda.o
