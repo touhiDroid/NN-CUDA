@@ -1,0 +1,22 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/main.cpp
+iterator
+-
+iostream
+-
+fstream
+-
+sstream
+-
+string
+-
+cmath
+/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmath
+
