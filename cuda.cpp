@@ -9,6 +9,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<cuda_runtime.h>
+#include<omp.h>
 #include <iterator>
 #include <iostream>
 #include <fstream>
@@ -38,7 +39,7 @@ using namespace std;
 // 270000 = 1500(data-instances) * [ 181 = 1(class) + 30(sub-carriers) * [ 3(transmitter-receiver pair) * [2(r & i)]]]
 float dataSet[270000];
 
-// TODO REDUCE : MPI / CUDA
+// TODO REDUCE : CUDA
 float calcForwardLoss(const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     float sqLossTotal = 0;
@@ -47,6 +48,30 @@ float calcForwardLoss(const float *currOutArr, int currArrSize,
         sqLossTotal += (d * d);
     }
     return sqrt(sqLossTotal / currArrSize);    // returning RMSE
+}
+
+__global__ void kernel_calcForwardLoss(float *result,
+                                       const float *currOutArr, const int *originalOutArr, int currArrSize) {
+    __shared__ float sharedMemory[256];
+
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    sharedMemory[threadIdx.x] = (tid < currArrSize) ?
+                                ((currOutArr[tid] - ((float) originalOutArr[tid]))
+                                 * (currOutArr[tid] - ((float) originalOutArr[tid]))) : 0;
+    __syncthreads();
+
+    // do reduction in shared memory
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s)
+            sharedMemory[threadIdx.x] += sharedMemory[threadIdx.x + s];
+
+        __syncthreads();
+    }
+
+    // write result for this block to global memory
+    if (threadIdx.x == 0)
+        atomicAdd( result, sqrt( (float) (sharedMemory[0] / currArrSize) ) );
 }
 
 // TODO TILED : CUDA
@@ -99,16 +124,7 @@ void matMultiply(const float *a, const float *b, float *answer, int r1, int c1, 
     }
 }
 
-// TODO CUDA
-// [1,2,3,4,5,6] -> [1,4,2,5,3,6], 3, 2
-void matTranspose(const float *a, float *m, int rowA, int colA) {
-    // Transpose: a[ 883 x [180] ] -> m[ 180 * [883] ]
-    for (int c = 0; c < rowA; ++c)
-        for (int r = 0; r < colA; ++r)
-            m[r * rowA + c] = a[c * colA + r];
-}
-
-__global__ void kernel_matTranspose(float *oData, float *iData, int width, int height) {
+__global__ void kernel_matTranspose(float *oData, float *iData, int height, int width) {
     __shared__ float tile[TILE_DIM][TILE_DIM + 1];
 
     int xi = blockIdx.x * TILE_DIM + threadIdx.x;
@@ -124,7 +140,7 @@ __global__ void kernel_matTranspose(float *oData, float *iData, int width, int h
         oData[yi * height + xi] = tile[threadIdx.x][threadIdx.y];
 }
 
-// OPENMP : Parallelize
+// TODO OPENMP : Parallelize
 void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     for (int i = 0; i < currArrSize; i++) {
@@ -260,8 +276,20 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         // predictedArray -> any float prediction of the probable classes
         cudaMemcpy(predictedArray, d_predictedArray, trainPredictArrSize, cudaMemcpyDeviceToHost);*/
         matMultiply(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
-        float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
-        printf("#%d: Loss = %f\n", e, lossTrain);
+        cudaMemcpy(d_predictedArray, predictedArray, trainPredictArrSize, cudaMemcpyHostToDevice);
+
+
+        // float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
+        float *lossTrain, *d_lossTrain;
+        cudaMallocHost(&lossTrain, sizeof(float));
+        cudaMalloc(&d_lossTrain, sizeof(float));
+        int threadsPerBlock = 256;
+        int blocksPerGrid = (numTrainData + threadsPerBlock - 1) / threadsPerBlock;
+        kernel_calcForwardLoss<<< blocksPerGrid, threadsPerBlock >>>(d_lossTrain, d_predictedArray,
+                                                                     d_originalClassArray, numTrainData);
+        cudaMemcpy(lossTrain, d_lossTrain, sizeof(float), cudaMemcpyDeviceToHost);
+        printf("#%d: Loss = %f\n", e, *lossTrain);
+
 
         // # Back-propagate:
         float *deltaBack = new float[numTrainData];
@@ -275,7 +303,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         cudaMallocHost(&mt, trainSize);
         cudaMalloc(&d_mt, trainSize);
 
-        kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray, 180, numTrainData);
+        kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray, numTrainData, 180);
         // kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray);
         cudaMemcpy(mt, d_mt, trainSize, cudaMemcpyDeviceToHost);
         /*float *mt = new float[trainSize];
@@ -286,7 +314,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         // # Apply optimizer
 
         updateWeightArray(nnWeightArray, deltaWeightArray, 180);
-        if (lossTrain < 1e-8)
+        if ((*lossTrain) < 1e-8)
             break;
     }
 
