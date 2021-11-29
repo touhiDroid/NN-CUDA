@@ -6,7 +6,7 @@ inputSize = 50
 outputSize = 30
 batchSize = 100
 testSize = 50
-epochs = 40000
+epochs = 4
 learningRate = 0.01
 seed = 123456
 
@@ -16,7 +16,7 @@ seed = 123456
 def forwardMult(A, B):
     return np.matmul(A, B)
 
-
+# (deltaBackArray,trainArray,nnWeightArray,deltaTrainArray,deltaWeightArray)
 def backwardMult(dC, A, B, dA, dB):
     dA += np.matmul(dC, np.matrix.transpose(B))
     dB += np.matmul(np.matrix.transpose(A), dC)
@@ -66,6 +66,7 @@ if __name__ == '__main__':
         # Forward pass train:
         nnOutput = forwardMult(inputArray, nnWeights)
         lossTrain = forwardloss(nnOutput, outputArray)
+        print("Forward Loss: " + str(lossTrain) + "\n")
         historyTrain.append(lossTrain)
 
         # Forward pass test:
@@ -76,12 +77,17 @@ if __name__ == '__main__':
             break
         # Print Loss every 50 epochs:
         if i % 50 == 0:
-            print("Epoch: " + str(i) + " Loss (train): " + "{0:.3f}".format(
-                lossTrain) + " Loss (test): " + "{0:.3f}".format(lossTest))
+            print("Epoch: #" + str(i) + "\n"
+                  + "\tLoss (train): " + "{0:.3f}".format(lossTrain)
+                  + "\tLoss (test): " + "{0:.3f}".format(lossTest))
 
         # Backpropagate
         deltaoutput = backwardloss(nnOutput, outputArray)
+        print(deltainput)
+        print("\n")
         backwardMult(deltaoutput, inputArray, nnWeights, deltainput, deltaweights)
+        print(deltainput)
+        print("\n")
 
         # Apply optimizer
         updateweights(nnWeights, deltaweights, learningRate)

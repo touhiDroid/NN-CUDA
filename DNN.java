@@ -10,6 +10,7 @@ public class DNN {
     private static final int EPOCHS = 10;
     private static final float LEARNING_RATE = 0.001f;
     private static final Random R = new Random(0);
+    private static final int RAND_MX = 10;
 
 
     private static void p(String msg) {
@@ -17,7 +18,7 @@ public class DNN {
     }
 
     private static float GEN_RAND() {
-        return R.nextFloat() % 10;
+        return R.nextFloat() % RAND_MX;
     }
 
     public static void main(String[] args) {
