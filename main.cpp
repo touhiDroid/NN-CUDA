@@ -62,18 +62,6 @@ void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize
     }
 }
 
-void backwardMultiply(float *deltaBackArray, const float *trainArray, const float *nnWeightArray,
-                      float *deltaTrainArray, float *deltaWeightArray, int numTrainData) {
-    //deltaTrainArray += np.matmul(deltaBackArray, np.matrix.transpose(nnWeightArray))
-    matMultiply(deltaBackArray, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
-
-    //deltaWeightArray += np.matmul(np.matrix.transpose(trainArray), deltaBackArray)
-    float *mt = new float[numTrainData * 180];
-    matTranspose(trainArray, mt, numTrainData, 180);
-    matMultiply(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
-    delete[] mt;
-}
-
 void updateWeightArray(float *w, const float *dw, int size) {
     for (int i = 0; i < size; i++)
         w[i] -= (dw[i] * LEARNING_RATE);
@@ -158,19 +146,32 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     // 1. Train:: -> Outcome: optimized nnWeightArray
     float *predictedArray = new float[numTrainData]; // r1=numTrainData size
     for (int e = 0; e < EPOCHS; e++) {
-        // # Forward pass train:
+        // #1. Forward pass train & calc. forward loss (by RMSE) to only understand the current status:
         matMultiply(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
         // predictedArray -> any float prediction of the probable classes
         float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
         printf("#%d: Loss = %f\n", e, lossTrain);
 
+        // #2. Backward propagation:
+        //  a. Calculate relative deviation of the predictions to have deltaBack
+        //          -> (still in confusion: why deltaTrainArray may be needed?)
+        //  b. Use the deltaBack array to calculate the deltaWeightArray
+        // 2.a
         float *deltaBack = new float[numTrainData];
         calcBackwardLoss(deltaBack, predictedArray, numTrainData, originalClassArray);
         float *deltaTrainArray = new float[numTrainPoints]; // 32400 = 180 * 180
-        float *deltaWeightArray = new float[180];    // same as the weight-array
-        backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
+        // backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
+        matMultiply(deltaBack, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
 
-        // # Apply optimizer
+        // 2.b
+        float *deltaWeightArray = new float[180];    // same as the weight-array
+        float *mt = new float[numTrainData * 180];
+        matTranspose(trainArray, mt, numTrainData, 180);
+        matMultiply(mt, deltaBack, deltaWeightArray, 180, numTrainData, numTrainData, 1);
+        delete[] mt;
+
+        // #3. Update the nnWeightArray by applying y=mx+c derivative,
+        // where y->new weights, x->old weights, m=learning_rate, c=bias (0 in this implementation)
         updateWeightArray(nnWeightArray, deltaWeightArray, 180);
         if (lossTrain < 1e-8)
             break;

@@ -39,17 +39,7 @@ using namespace std;
 // 270000 = 1500(data-instances) * [ 181 = 1(class) + 30(sub-carriers) * [ 3(transmitter-receiver pair) * [2(r & i)]]]
 float dataSet[270000];
 
-// TODO REDUCE : CUDA
-float calcForwardLoss(const float *currOutArr, int currArrSize,
-                      const int *originalOutArr, int startOffSetOriginalArr = 0) {
-    float sqLossTotal = 0;
-    for (int i = 0; i < currArrSize; i++) {
-        float d = currOutArr[i] - ((float) originalOutArr[startOffSetOriginalArr + i]);
-        sqLossTotal += (d * d);
-    }
-    return sqrt(sqLossTotal / currArrSize);    // returning RMSE
-}
-
+// REDUCE : CUDA
 __global__ void kernel_calcForwardLoss(float *result,
                                        const float *currOutArr, const int *originalOutArr, int currArrSize) {
     __shared__ float sharedMemory[256];
@@ -140,18 +130,29 @@ __global__ void kernel_matTranspose(float *oData, float *iData, int height, int 
         oData[yi * height + xi] = tile[threadIdx.x][threadIdx.y];
 }
 
-// TODO OPENMP : Parallelize
-void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
+// TODO : Parallelize : CUDA
+/*void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     for (int i = 0; i < currArrSize; i++) {
         deltaLoss[i] = (currOutArr[i] - ((float) originalOutArr[startOffSetOriginalArr + i])) / currArrSize;
     }
+}*/
+__global__ void kernel_calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
+                                        const int *originalOutArr) {
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (tid < currArrSize)
+        deltaLoss[tid] = (currOutArr[tid] - ((float) originalOutArr[tid])) / currArrSize;
 }
 
-// TODO Parallelize : MPI / OpenMP / CUDA
-void updateWeightArray(float *w, const float *dw, int size) {
+// TODO Parallelize : CUDA
+/*void updateWeightArray(float *w, const float *dw, int size) {
     for (int i = 0; i < size; i++)
         w[i] -= (dw[i] * LEARNING_RATE);
+}*/
+__global__ void kernel_updateWeightArray(float *w, const float *dw, int size) {
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (tid < size)
+        w[tid] = w[tid] - (dw[tid] * LEARNING_RATE);
 }
 
 int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *argv[]) {
@@ -265,9 +266,12 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
 
     dim3 matTrDimGrid(180 / TILE_DIM, numTrainData / TILE_DIM, 1);
     dim3 matTrDimBlock(TILE_DIM, TILE_DIM, 1);
+    const int threadsPerBlock = 256;
+    const int blocksPerGrid = (numTrainData + threadsPerBlock - 1) / threadsPerBlock;
+    const int blocksPerWtGrid = (180 + threadsPerBlock - 1) / threadsPerBlock;
 
     for (int e = 0; e < EPOCHS; e++) {
-        // # Forward pass train:
+        // #1. Forward pass train & calc. forward loss (by RMSE) to only understand the current status:
         /*int gridDimMult = (180 + TILE_DIM - 1 ) / TILE_DIM; // 180 = col. count of train-array
         dim3 blockSize (TILE_DIM, TILE_DIM);
         dim3 gridSize (gridDimMult, gridDimMult);
@@ -283,37 +287,44 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         float *lossTrain, *d_lossTrain;
         cudaMallocHost(&lossTrain, sizeof(float));
         cudaMalloc(&d_lossTrain, sizeof(float));
-        int threadsPerBlock = 256;
-        int blocksPerGrid = (numTrainData + threadsPerBlock - 1) / threadsPerBlock;
         kernel_calcForwardLoss<<< blocksPerGrid, threadsPerBlock >>>(d_lossTrain, d_predictedArray,
                                                                      d_originalClassArray, numTrainData);
         cudaMemcpy(lossTrain, d_lossTrain, sizeof(float), cudaMemcpyDeviceToHost);
         printf("#%d: Loss = %f\n", e, *lossTrain);
 
 
-        // # Back-propagate:
-        float *deltaBack = new float[numTrainData];
-        calcBackwardLoss(deltaBack, predictedArray, numTrainData, originalClassArray);
+        // #2. Backward propagation:
+        //  a. Calculate relative deviation of the predictions to have deltaBack
+        //          -> (still in confusion: why deltaTrainArray may be needed?)
+        //  b. Use the deltaBack array to calculate the deltaWeightArray
+        // 2.a
+        float *deltaBack, *d_deltaBack;//  = new float[numTrainData];
+        cudaMallocHost(&deltaBack, numTrainData * sizeof(float));
+        cudaMalloc(&d_deltaBack, numTrainData * sizeof(float));
+        kernel_calcBackwardLoss<<< blocksPerGrid, threadsPerBlock >>>(d_deltaBack, d_predictedArray,
+                                                                      numTrainData, d_originalClassArray);
+        cudaMemcpy(deltaBack, d_deltaBack, numTrainData * sizeof(float), cudaMemcpyDeviceToHost);
         float *deltaTrainArray = new float[numTrainPoints]; // 32400 = 180 * 180
-        float *deltaWeightArray = new float[180];    // same as the weight-array
-        // backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
         matMultiply(deltaBack, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
 
+        // 2.b
+        float *deltaWeightArray, *d_deltaWeightArray;    // same as the weight-array
+        cudaMallocHost(&deltaWeightArray, weightArrSize);
+        cudaMalloc(&d_deltaWeightArray, weightArrSize);
         float *mt, *d_mt;
         cudaMallocHost(&mt, trainSize);
         cudaMalloc(&d_mt, trainSize);
-
         kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray, numTrainData, 180);
-        // kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray);
         cudaMemcpy(mt, d_mt, trainSize, cudaMemcpyDeviceToHost);
-        /*float *mt = new float[trainSize];
-        matTranspose(trainArray, mt, numTrainData, 180);*/
-
         matMultiply(mt, deltaBack, deltaWeightArray, 180, numTrainData, numTrainData, 1);
 
-        // # Apply optimizer
 
-        updateWeightArray(nnWeightArray, deltaWeightArray, 180);
+        // #3. Update the nnWeightArray by applying y=mx+c derivative,
+        // where y->new weights, x->old weights, m=learning_rate, c=bias (0 in this implementation)
+        cudaMemcpy(d_nnWeightArray, nnWeightArray, weightArrSize, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_deltaWeightArray, deltaWeightArray, weightArrSize, cudaMemcpyHostToDevice);
+        kernel_updateWeightArray <<< blocksPerWtGrid, threadsPerBlock >>> (d_nnWeightArray, d_deltaWeightArray, 180);
+        cudaMemcpy(nnWeightArray, d_nnWeightArray, weightArrSize, cudaMemcpyDeviceToHost);
         if ((*lossTrain) < 1e-8)
             break;
     }
