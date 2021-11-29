@@ -2,6 +2,7 @@
 #pragma clang diagnostic pop
 #pragma ide diagnostic ignored "cppcoreguidelines-narrowing-conversions"
 #pragma ide diagnostic ignored "cert-msc50-cpp"
+#pragma ide diagnostic ignored "modernize-use-auto"
 //
 // Created by Md Touhiduzzaman on 10/24/21.
 //
@@ -15,7 +16,7 @@
 #define GEN_RAND ( (rand() % 10) / 10 )
 
 #define EPOCHS 500 // for debug: 10, for real: 10000+
-#define LEARNING_RATE 0.0001
+#define LEARNING_RATE 0.0001    // e=500, lr=0.0001, Test Accuracy: 294 / 379 = 77.57%, loss=0.456487->0.438812
 
 using namespace std;
 
@@ -67,7 +68,7 @@ void backwardMultiply(float *deltaBackArray, const float *trainArray, const floa
     matMultiplyOneDimArr(deltaBackArray, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
 
     //deltaWeightArray += np.matmul(np.matrix.transpose(trainArray), deltaBackArray)
-    auto *mt = new float[numTrainData * 180];
+    float *mt = new float[numTrainData * 180];
     matTranspose(trainArray, mt, numTrainData, 180);
     matMultiplyOneDimArr(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
 }
@@ -99,11 +100,11 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
 
     // construct trainArray
     int numTrainPoints = numTrainData * (30 * 3 * 2);
-    auto *trainArray = new float[numTrainPoints];
+    float *trainArray = new float[numTrainPoints]; // NOLINT(modernize-use-auto)
     int classCount = 0;
     bool b = false;
     int p = 0;
-    for (p = 0; p < (numTrainPoints + classCount); p++)
+    for (; p < (numTrainPoints + classCount); p++)
         if (b && ((p - classCount) % 180 == 0)) {
             originalClassArray[classCount++] = (int) dataSet[p];
             b = false;
@@ -117,7 +118,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
 
     // construct testArray
     int numTestPoints = numTestData * (30 * 3 * 2);
-    auto *testArray = new float[numTestPoints];
+    float *testArray = new float[numTestPoints];
     int classCountTest = 0;
     b = false;
     for (; p < numTotalDataPoints; p++)
@@ -134,20 +135,20 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
            numTrainData, numTrainPoints, numTestData, numTestPoints, numTotalDataPoints, classCount);
 
     // init nnWeightArray = [feature-count = 180]
-    auto *nnWeightArray = new float[180];
+    float *nnWeightArray = new float[180];
     for (int i = 0; i < 180; i++)
-        nnWeightArray[i] = GEN_RAND;
+        nnWeightArray[i] = GEN_RAND; // NOLINT(bugprone-integer-division)
 
     /*Testing matrix multiplication:* /
-    auto *ta = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 7x3 matrix
-    // auto *tb = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 3x7 matrix
-    auto *tb = new float[3] {1, 2, 3}; // 3x1 matrix
-    auto *tc = new float[7]; // 7x1 multiplication-resultant matrix
+    float *ta = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 7x3 matrix
+    // float *tb = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 3x7 matrix
+    float *tb = new float[3] {1, 2, 3}; // 3x1 matrix
+    float *tc = new float[7]; // 7x1 multiplication-resultant matrix
     matMultiplyOneDimArr(ta, tb, tc, 7, 3, 3, 1);*/
 
     // DNN algo. starts from here:
     // 1. Train:: -> Outcome: optimized nnWeightArray
-    auto *predictedArray = new float[numTrainData]; // r1=numTrainData size
+    float *predictedArray = new float[numTrainData]; // r1=numTrainData size
     for (int e = 0; e < EPOCHS; e++) {
         // # Forward pass train:
         matMultiplyOneDimArr(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
@@ -155,10 +156,10 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
         printf("#%d: Loss = %f\n", e, lossTrain);
 
-        auto *deltaBack = new float[numTrainData];
+        float *deltaBack = new float[numTrainData];
         calcBackwardLoss(deltaBack, predictedArray, numTrainData, originalClassArray);
-        auto *deltaTrainArray = new float[numTrainPoints]; // 32400 = 180 * 180
-        auto *deltaWeightArray = new float[180];    // same as the weight-array
+        float *deltaTrainArray = new float[numTrainPoints]; // 32400 = 180 * 180
+        float *deltaWeightArray = new float[180];    // same as the weight-array
         backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
 
         // # Apply optimizer
@@ -171,8 +172,6 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     matMultiplyOneDimArr(testArray, nnWeightArray, predictedArray, numTestData, 180, 180, 1);
     int numRightGuess = 0;
     for (int t = 0; t < numTestData; t++) {
-        /*float d = predictedArray[t] - originalClassArray[numTrainData + t];
-        if (d < 0) d *= (-1);*/
         if (predictedArray[t] < 0.0f) predictedArray[t] *= (-1);
         int c = predictedArray[t] < 0.5 ? 0 : 1;
         if (c == originalClassArray[numTrainData + t])
