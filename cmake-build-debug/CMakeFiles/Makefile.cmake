@@ -50,6 +50,5 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/DNN_CUDA.dir/DependInfo.cmake"
   "CMakeFiles/DNN.dir/DependInfo.cmake"
   )

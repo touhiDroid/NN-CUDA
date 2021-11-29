@@ -181,9 +181,9 @@ public class DNN {
         //deltaTrainArray += np.matmul(deltaBackArray, np.matrix.transpose(nnWeightArray))
         float[] deltaTrainArray = matMultiplyOneDimArr(deltaBackArray, nnWeightArray, numTrainData, 1, 1, 180);
 
-        //deltaWeightArray += np.matmul(np.matrix.transpose(trainArray), deltaBackArray)
+        //deltaWeightArray += np.matmul(np.matrix.kernel_matTranspose(trainArray), deltaBackArray)
         float[] mt = matTranspose(trainArray, numTrainData, 180);
-        return matMultiplyOneDimArr(mt, deltaBackArray, 180, numTrainData, numTrainData, 1);
+        return matMultiply(mt, deltaBackArray, 180, numTrainData, numTrainData, 1);
     }
 
     private static float[] updateWeightArray(float[] w, float[] dw, int size, float lr) {

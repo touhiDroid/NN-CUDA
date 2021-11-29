@@ -6,6 +6,9 @@
 //
 // Created by Md Touhiduzzaman on 10/24/21.
 //
+#include<stdio.h>
+#include<stdlib.h>
+#include<cuda_runtime.h>
 #include <iterator>
 #include <iostream>
 #include <fstream>
@@ -27,6 +30,9 @@
 #define EPOCHS 500 // for debug: 10, for real: 10000+
 #define LEARNING_RATE 0.0001    // e=500, lr=0.0001, Test Accuracy: 294 / 379 = 77.57%, loss=0.456487->0.438812
 
+#define TILE_DIM 32 // 9  // since 180 is a fixed known dim.
+// #define BLOCK_ROWS 8 // 3 // For mat-transpose
+
 using namespace std;
 
 // 270000 = 1500(data-instances) * [ 181 = 1(class) + 30(sub-carriers) * [ 3(transmitter-receiver pair) * [2(r & i)]]]
@@ -44,7 +50,42 @@ float calcForwardLoss(const float *currOutArr, int currArrSize,
 }
 
 // TODO TILED : CUDA
-void matMultiplyOneDimArr(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
+__global__ void kernel_matMultiply(float *A, float *B, float *C, int rowA, int colA, int rowB, int colB) {
+    float cellSum = 0;
+
+    int currRow = blockIdx.y * TILE_DIM + threadIdx.y;
+    int currCol = blockIdx.x * TILE_DIM + threadIdx.x;
+
+    __shared__ float tileA[TILE_DIM][TILE_DIM];
+    __shared__ float tileB[TILE_DIM][TILE_DIM];
+
+    int numIterationTiles = (colA + TILE_DIM - 1) / TILE_DIM;
+    for (int k = 0; k < numIterationTiles; k++) {
+
+        if (k * TILE_DIM + threadIdx.x < colA && currRow < rowA)
+            tileA[threadIdx.y][threadIdx.x] = A[currRow * colA + k * TILE_DIM + threadIdx.x];
+        else
+            tileA[threadIdx.y][threadIdx.x] = 0.0;
+
+        if (k * TILE_DIM + threadIdx.y < rowB && currCol < colB)
+            tileB[threadIdx.y][threadIdx.x] = B[(k * TILE_DIM + threadIdx.y) * colB + currCol];
+        else
+            tileB[threadIdx.y][threadIdx.x] = 0.0;
+
+        __syncthreads();
+
+        for (int n = 0; n < TILE_DIM; ++n)
+            cellSum += tileA[threadIdx.y][n] * tileB[n][threadIdx.x];
+
+        __syncthreads();
+    }
+
+    if (currRow < rowA && currCol < colB)
+        C[((blockIdx.y * blockDim.y + threadIdx.y) * colB) +
+          (blockIdx.x * blockDim.x) + threadIdx.x] = cellSum;
+}
+
+void matMultiply(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
     float cellSum = 0;
     int i, j, k;
     // r1==c2, r2==c1
@@ -67,24 +108,28 @@ void matTranspose(const float *a, float *m, int rowA, int colA) {
             m[r * rowA + c] = a[c * colA + r];
 }
 
+__global__ void kernel_matTranspose(float *oData, float *iData, int width, int height) {
+    __shared__ float tile[TILE_DIM][TILE_DIM + 1];
+
+    int xi = blockIdx.x * TILE_DIM + threadIdx.x;
+    int yi = blockIdx.y * TILE_DIM + threadIdx.y;
+    if ((xi < width) && (yi < height))
+        tile[threadIdx.y][threadIdx.x] = iData[yi * width + xi];
+
+    __syncthreads();
+
+    xi = blockIdx.y * TILE_DIM + threadIdx.x;
+    yi = blockIdx.x * TILE_DIM + threadIdx.y;
+    if ((xi < height) && (yi < width))
+        oData[yi * height + xi] = tile[threadIdx.x][threadIdx.y];
+}
+
 // OPENMP : Parallelize
 void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     for (int i = 0; i < currArrSize; i++) {
         deltaLoss[i] = (currOutArr[i] - ((float) originalOutArr[startOffSetOriginalArr + i])) / currArrSize;
     }
-}
-
-// Shall have nested CUDA calls
-void backwardMultiply(float *deltaBackArray, const float *trainArray, const float *nnWeightArray,
-                      float *deltaTrainArray, float *deltaWeightArray, int numTrainData) {
-    //deltaTrainArray += np.matmul(deltaBackArray, np.matrix.transpose(nnWeightArray))
-    matMultiplyOneDimArr(deltaBackArray, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
-
-    //deltaWeightArray += np.matmul(np.matrix.transpose(trainArray), deltaBackArray)
-    float *mt = new float[numTrainData * 180];
-    matTranspose(trainArray, mt, numTrainData, 180);
-    matMultiplyOneDimArr(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
 }
 
 // TODO Parallelize : MPI / OpenMP / CUDA
@@ -94,6 +139,9 @@ void updateWeightArray(float *w, const float *dw, int size) {
 }
 
 int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *argv[]) {
+    struct timespec begin, start, end;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &begin);
+
     ifstream csiPrunedCsvFile("csi_pruned.csv");
     string csvStr;
     int numTotalDataPoints = 0;
@@ -105,17 +153,34 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
             dataSet[numTotalDataPoints++] = atof(singleFloatItem.c_str()); // NOLINT(cert-err34-c)
         numData++;
     }
-    int *originalClassArray = new int[numData];
     printf("Read %d float items into the dataSet 1-D array\nTotal Data Item: %d\n", numTotalDataPoints, numData);
 
+    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+    uint64_t dTimeMs = (1000000000L * (start.tv_sec - begin.tv_sec) + start.tv_nsec - begin.tv_nsec) / 1e6;
+    printf("Data reading time required: %llu ms\n", (long long unsigned int) dTimeMs);
+
+
+    // 1. cudaEventCreate
+    float ms = 0.0;
+    cudaEvent_t startCuda, stopCuda;
+    cudaEventCreate(&startCuda);
+    cudaEventCreate(&stopCuda);
 
     // DNN : DS init
     int numTrainData = (int) (numData * 0.7f);   // 70% to be the training data
     int numTestData = numData - numTrainData;   // the rest (~30%) to be the test data
 
+    // 2. init - cudaMallocHost & cudaMalloc
+    int *originalClassArray, *d_originalClassArray;
+    cudaMallocHost(&originalClassArray, numData * sizeof(int));
+    cudaMalloc(&d_originalClassArray, numData * sizeof(int));
+
     // construct trainArray
     int numTrainPoints = numTrainData * (30 * 3 * 2);
-    float *trainArray = new float[numTrainPoints]; // NOLINT(modernize-use-auto)
+    float *trainArray, *d_trainArray;
+    size_t trainSize = numTrainPoints * sizeof(float);
+    cudaMallocHost(&trainArray, trainSize);
+    cudaMalloc(&d_trainArray, trainSize);
     int classCount = 0;
     bool b = false;
     int p = 0;
@@ -134,7 +199,10 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
 
     // construct testArray
     int numTestPoints = numTestData * (30 * 3 * 2);
-    float *testArray = new float[numTestPoints];
+    float *testArray, *d_testArray;
+    size_t testSize = numTestPoints * sizeof(float);
+    cudaMallocHost(&testArray, testSize);
+    cudaMalloc(&d_testArray, testSize);
     int classCountTest = 0;
     b = false;
     // TODO : Potential Parallelization by MPI / OpenMP / CUDA - but wd be difficult due to inc.
@@ -147,47 +215,84 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
             testArray[p - numTrainPoints - classCount] = dataSet[p];
             b = true;
         }
+    // 3. cudaMemcpy
+    cudaMemcpy(d_originalClassArray, originalClassArray, numData * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_trainArray, trainArray, trainSize, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_testArray, testArray, testSize, cudaMemcpyHostToDevice);
 
     printf("numTrainData=%d, numTrainPoints=%d, numTestData=%d, numTestPoints=%d, numTotalDataPoints=%d, classCount=%d\n",
            numTrainData, numTrainPoints, numTestData, numTestPoints, numTotalDataPoints, classCount);
 
     // init nnWeightArray = [feature-count = 180]
-    float *nnWeightArray = new float[180];
+    float *nnWeightArray, *d_nnWeightArray;
+    size_t weightArrSize = 180 * sizeof(float);
+    cudaMallocHost(&nnWeightArray, weightArrSize);
+    cudaMalloc(&d_nnWeightArray, weightArrSize);
     // TODO Parallelize via OpenMP / MPI / CUDA
     for (int i = 0; i < 180; i++)
         nnWeightArray[i] = GEN_RAND; // NOLINT(bugprone-integer-division)
+    cudaMemcpy(d_nnWeightArray, nnWeightArray, weightArrSize, cudaMemcpyHostToDevice);
 
     /*Testing matrix multiplication:* /
     float *ta = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 7x3 matrix
     // float *tb = new float[21] {1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6, 7, 8, 9}; // 3x7 matrix
     float *tb = new float[3] {1, 2, 3}; // 3x1 matrix
     float *tc = new float[7]; // 7x1 multiplication-resultant matrix
-    matMultiplyOneDimArr(ta, tb, tc, 7, 3, 3, 1);*/
+    matMultiply(ta, tb, tc, 7, 3, 3, 1);*/
 
     // DNN algo. starts from here:
-    // 1. Train:: -> Outcome: optimized nnWeightArray
-    float *predictedArray = new float[numTrainData]; // r1=numTrainData size
+    // A. Train:: -> Outcome: optimized nnWeightArray
+    float *predictedArray, *d_predictedArray; // = new float[numTrainData]; // r1=numTrainData size
+    size_t trainPredictArrSize = numTrainData * sizeof(float);
+    cudaMallocHost(&predictedArray, trainPredictArrSize);
+    cudaMalloc(&d_predictedArray, trainPredictArrSize);
+
+    dim3 matTrDimGrid(180 / TILE_DIM, numTrainData / TILE_DIM, 1);
+    dim3 matTrDimBlock(TILE_DIM, TILE_DIM, 1);
+
     for (int e = 0; e < EPOCHS; e++) {
         // # Forward pass train:
-        matMultiplyOneDimArr(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
+        /*int gridDimMult = (180 + TILE_DIM - 1 ) / TILE_DIM; // 180 = col. count of train-array
+        dim3 blockSize (TILE_DIM, TILE_DIM);
+        dim3 gridSize (gridDimMult, gridDimMult);
+        kernel_matMultiply<<< gridSize, blockSize >>>(
+                d_trainArray, d_nnWeightArray, d_predictedArray, numTrainData, 180, 180, 1);
         // predictedArray -> any float prediction of the probable classes
+        cudaMemcpy(predictedArray, d_predictedArray, trainPredictArrSize, cudaMemcpyDeviceToHost);*/
+        matMultiply(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
         float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
         printf("#%d: Loss = %f\n", e, lossTrain);
 
+        // # Back-propagate:
         float *deltaBack = new float[numTrainData];
         calcBackwardLoss(deltaBack, predictedArray, numTrainData, originalClassArray);
         float *deltaTrainArray = new float[numTrainPoints]; // 32400 = 180 * 180
         float *deltaWeightArray = new float[180];    // same as the weight-array
-        backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
+        // backwardMultiply(deltaBack, trainArray, nnWeightArray, deltaTrainArray, deltaWeightArray, numTrainData);
+        matMultiply(deltaBack, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
+
+        float *mt, *d_mt;
+        cudaMallocHost(&mt, trainSize);
+        cudaMalloc(&d_mt, trainSize);
+
+        kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray, 180, numTrainData);
+        // kernel_matTranspose<<< matTrDimGrid, matTrDimBlock >>>(d_mt, d_trainArray);
+        cudaMemcpy(mt, d_mt, trainSize, cudaMemcpyDeviceToHost);
+        /*float *mt = new float[trainSize];
+        matTranspose(trainArray, mt, numTrainData, 180);*/
+
+        matMultiply(mt, deltaBack, deltaWeightArray, 180, numTrainData, numTrainData, 1);
 
         // # Apply optimizer
+
         updateWeightArray(nnWeightArray, deltaWeightArray, 180);
         if (lossTrain < 1e-8)
             break;
     }
 
+    // B. Test:: -> Outcome: optimized nnWeightArray
     predictedArray = new float[numTestData];
-    matMultiplyOneDimArr(testArray, nnWeightArray, predictedArray, numTestData, 180, 180, 1);
+    matMultiply(testArray, nnWeightArray, predictedArray, numTestData, 180, 180, 1);
     int numRightGuess = 0;
     for (int t = 0; t < numTestData; t++) {
         if (predictedArray[t] < 0.0f) predictedArray[t] *= (-1);
@@ -195,7 +300,30 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         if (c == originalClassArray[numTrainData + t])
             numRightGuess++;
     }
-    printf("Test Accuracy: %d / %d = %2.2f%%\n", numRightGuess, numTestData, ((numRightGuess * 100.0) / numTestData));
+    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+    uint64_t dAlgoTimeMsg = (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6;
+    printf("Test Accuracy: %d / %d = %2.2f%%\nRuntime: %llu ms\n", numRightGuess, numTestData,
+           ((numRightGuess * 100.0) / numTestData), (long long unsigned int) dAlgoTimeMsg);
+
+
+    // 6. free mem. & destroy events
+    cudaFreeHost(trainArray);
+    cudaFree(d_trainArray);
+
+    cudaFreeHost(testArray);
+    cudaFree(d_testArray);
+
+    cudaFreeHost(nnWeightArray);
+    cudaFree(d_nnWeightArray);
+
+    cudaFreeHost(predictedArray);
+    cudaFree(d_predictedArray);
+
+    cudaFreeHost(originalClassArray);
+    cudaFree(d_originalClassArray);
+
+    cudaEventDestroy(startCuda);
+    cudaEventDestroy(stopCuda);
 
     return 0;
 }

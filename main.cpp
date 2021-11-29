@@ -33,7 +33,7 @@ float calcForwardLoss(const float *currOutArr, int currArrSize,
     return sqrt(sqLossTotal / currArrSize);    // returning RMSE
 }
 
-void matMultiplyOneDimArr(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
+void matMultiply(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
     float cellSum = 0;
     int i, j, k;
     // r1==c2, r2==c1
@@ -65,12 +65,12 @@ void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize
 void backwardMultiply(float *deltaBackArray, const float *trainArray, const float *nnWeightArray,
                       float *deltaTrainArray, float *deltaWeightArray, int numTrainData) {
     //deltaTrainArray += np.matmul(deltaBackArray, np.matrix.transpose(nnWeightArray))
-    matMultiplyOneDimArr(deltaBackArray, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
+    matMultiply(deltaBackArray, nnWeightArray, deltaTrainArray, numTrainData, 1, 1, 180);
 
     //deltaWeightArray += np.matmul(np.matrix.transpose(trainArray), deltaBackArray)
     float *mt = new float[numTrainData * 180];
     matTranspose(trainArray, mt, numTrainData, 180);
-    matMultiplyOneDimArr(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
+    matMultiply(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
     delete[] mt;
 }
 
@@ -159,7 +159,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     float *predictedArray = new float[numTrainData]; // r1=numTrainData size
     for (int e = 0; e < EPOCHS; e++) {
         // # Forward pass train:
-        matMultiplyOneDimArr(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
+        matMultiply(trainArray, nnWeightArray, predictedArray, numTrainData, 180, 180, 1);
         // predictedArray -> any float prediction of the probable classes
         float lossTrain = calcForwardLoss(predictedArray, numTrainData, originalClassArray);
         printf("#%d: Loss = %f\n", e, lossTrain);
@@ -177,7 +177,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     }
 
     predictedArray = new float[numTestData];
-    matMultiplyOneDimArr(testArray, nnWeightArray, predictedArray, numTestData, 180, 180, 1);
+    matMultiply(testArray, nnWeightArray, predictedArray, numTestData, 180, 180, 1);
     int numRightGuess = 0;
     for (int t = 0; t < numTestData; t++) {
         if (predictedArray[t] < 0.0f) predictedArray[t] *= (-1);

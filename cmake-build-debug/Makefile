@@ -117,19 +117,6 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named DNN_CUDA
-
-# Build rule for target.
-DNN_CUDA: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 DNN_CUDA
-.PHONY : DNN_CUDA
-
-# fast build rule for target.
-DNN_CUDA/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN_CUDA.dir/build.make CMakeFiles/DNN_CUDA.dir/build
-.PHONY : DNN_CUDA/fast
-
-#=============================================================================
 # Target rules for targets named DNN
 
 # Build rule for target.
@@ -147,7 +134,7 @@ cuda.o: cuda.cpp.o
 
 # target to build an object file
 cuda.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN_CUDA.dir/build.make CMakeFiles/DNN_CUDA.dir/cuda.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.o
 .PHONY : cuda.cpp.o
 
 cuda.i: cuda.cpp.i
@@ -155,7 +142,7 @@ cuda.i: cuda.cpp.i
 
 # target to preprocess a source file
 cuda.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN_CUDA.dir/build.make CMakeFiles/DNN_CUDA.dir/cuda.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.i
 .PHONY : cuda.cpp.i
 
 cuda.s: cuda.cpp.s
@@ -163,7 +150,7 @@ cuda.s: cuda.cpp.s
 
 # target to generate assembly for a file
 cuda.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN_CUDA.dir/build.make CMakeFiles/DNN_CUDA.dir/cuda.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.s
 .PHONY : cuda.cpp.s
 
 main.o: main.cpp.o
@@ -199,7 +186,6 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... DNN"
-	@echo "... DNN_CUDA"
 	@echo "... cuda.o"
 	@echo "... cuda.i"
 	@echo "... cuda.s"

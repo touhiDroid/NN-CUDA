@@ -1,4 +1,3 @@
 /Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/rebuild_cache.dir
 /Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/edit_cache.dir
-/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/DNN_CUDA.dir
 /Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/DNN.dir
