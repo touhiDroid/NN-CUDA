@@ -8,7 +8,6 @@ set(CMAKE_DEPENDS_LANGUAGES
   )
 # The set of files for implicit dependencies of each language:
 set(CMAKE_DEPENDS_CHECK_CXX
-  "/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cuda.cpp" "/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/DNN.dir/cuda.cpp.o"
   "/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/main.cpp" "/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cmake-build-debug/CMakeFiles/DNN.dir/main.cpp.o"
   )
 set(CMAKE_CXX_COMPILER_ID "AppleClang")

@@ -80,9 +80,6 @@
 				</MakeCommands>
 			</Target>
 		</Build>
-		<Unit filename="/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/cuda.cpp">
-			<Option target="DNN"/>
-		</Unit>
 		<Unit filename="/Users/touhiduzzamm/dev/cuda/2021-603-Project-Touhiduzzaman/main.cpp">
 			<Option target="DNN"/>
 		</Unit>

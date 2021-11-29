@@ -1,5 +1,4 @@
 file(REMOVE_RECURSE
-  "CMakeFiles/DNN.dir/cuda.cpp.o"
   "CMakeFiles/DNN.dir/main.cpp.o"
   "DNN"
   "DNN.pdb"
