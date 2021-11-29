@@ -10,7 +10,16 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+//#include <bits/stdc++.h>
+//#include <omp.h>
+#include <pthread.h>
 #include "cmath"
+
+#ifdef __CDT_PARSER__
+#define __global__
+#define __device__
+#define __shared__
+#endif
 
 // #define RAND_MX 1
 #define GEN_RAND ( (rand() % 10) / 10 )
@@ -23,6 +32,7 @@ using namespace std;
 // 270000 = 1500(data-instances) * [ 181 = 1(class) + 30(sub-carriers) * [ 3(transmitter-receiver pair) * [2(r & i)]]]
 float dataSet[270000];
 
+// TODO REDUCE : MPI / CUDA
 float calcForwardLoss(const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     float sqLossTotal = 0;
@@ -33,6 +43,7 @@ float calcForwardLoss(const float *currOutArr, int currArrSize,
     return sqrt(sqLossTotal / currArrSize);    // returning RMSE
 }
 
+// TODO TILED : CUDA
 void matMultiplyOneDimArr(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
     float cellSum = 0;
     int i, j, k;
@@ -47,6 +58,7 @@ void matMultiplyOneDimArr(const float *a, const float *b, float *answer, int r1,
     }
 }
 
+// TODO CUDA
 // [1,2,3,4,5,6] -> [1,4,2,5,3,6], 3, 2
 void matTranspose(const float *a, float *m, int rowA, int colA) {
     // Transpose: a[ 883 x [180] ] -> m[ 180 * [883] ]
@@ -55,6 +67,7 @@ void matTranspose(const float *a, float *m, int rowA, int colA) {
             m[r * rowA + c] = a[c * colA + r];
 }
 
+// OPENMP : Parallelize
 void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
                       const int *originalOutArr, int startOffSetOriginalArr = 0) {
     for (int i = 0; i < currArrSize; i++) {
@@ -62,6 +75,7 @@ void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize
     }
 }
 
+// Shall have nested CUDA calls
 void backwardMultiply(float *deltaBackArray, const float *trainArray, const float *nnWeightArray,
                       float *deltaTrainArray, float *deltaWeightArray, int numTrainData) {
     //deltaTrainArray += np.matmul(deltaBackArray, np.matrix.transpose(nnWeightArray))
@@ -73,15 +87,13 @@ void backwardMultiply(float *deltaBackArray, const float *trainArray, const floa
     matMultiplyOneDimArr(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
 }
 
+// TODO Parallelize : MPI / OpenMP / CUDA
 void updateWeightArray(float *w, const float *dw, int size) {
     for (int i = 0; i < size; i++)
         w[i] -= (dw[i] * LEARNING_RATE);
 }
 
 int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *argv[]) {
-    struct timespec begin, start, end;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &begin);
-
     ifstream csiPrunedCsvFile("csi_pruned.csv");
     string csvStr;
     int numTotalDataPoints = 0;
@@ -96,10 +108,6 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     int *originalClassArray = new int[numData];
     printf("Read %d float items into the dataSet 1-D array\nTotal Data Item: %d\n", numTotalDataPoints, numData);
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
-    uint64_t dTimeMs = (1000000000L * (start.tv_sec - begin.tv_sec) + start.tv_nsec - begin.tv_nsec) / 1e6;
-    printf("Data reading time required: %llu ms\n", (long long unsigned int) dTimeMs);
-
 
     // DNN : DS init
     int numTrainData = (int) (numData * 0.7f);   // 70% to be the training data
@@ -111,6 +119,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     int classCount = 0;
     bool b = false;
     int p = 0;
+    // TODO : Potential Parallelization by MPI / OpenMP / CUDA - but wd be difficult due to inc.
     for (; p < (numTrainPoints + classCount); p++)
         if (b && ((p - classCount) % 180 == 0)) {
             originalClassArray[classCount++] = (int) dataSet[p];
@@ -128,6 +137,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     float *testArray = new float[numTestPoints];
     int classCountTest = 0;
     b = false;
+    // TODO : Potential Parallelization by MPI / OpenMP / CUDA - but wd be difficult due to inc.
     for (; p < numTotalDataPoints; p++)
         if (b && ((p - classCount) % 180 == 0)) {
             originalClassArray[classCount++] = (int) dataSet[p];
@@ -143,6 +153,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
 
     // init nnWeightArray = [feature-count = 180]
     float *nnWeightArray = new float[180];
+    // TODO Parallelize via OpenMP / MPI / CUDA
     for (int i = 0; i < 180; i++)
         nnWeightArray[i] = GEN_RAND; // NOLINT(bugprone-integer-division)
 
@@ -184,10 +195,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         if (c == originalClassArray[numTrainData + t])
             numRightGuess++;
     }
-    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
-    uint64_t dAlgoTimeMsg = (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6;
-    printf("Test Accuracy: %d / %d = %2.2f%%\nRuntime: %llu ms\n", numRightGuess, numTestData,
-           ((numRightGuess * 100.0) / numTestData), (long long unsigned int) dAlgoTimeMsg);
+    printf("Test Accuracy: %d / %d = %2.2f%%\n", numRightGuess, numTestData, ((numRightGuess * 100.0) / numTestData));
 
     return 0;
 }
