@@ -71,6 +71,7 @@ void backwardMultiply(float *deltaBackArray, const float *trainArray, const floa
     float *mt = new float[numTrainData * 180];
     matTranspose(trainArray, mt, numTrainData, 180);
     matMultiplyOneDimArr(mt, deltaBackArray, deltaWeightArray, 180, numTrainData, numTrainData, 1);
+    delete[] mt;
 }
 
 void updateWeightArray(float *w, const float *dw, int size) {
@@ -188,6 +189,12 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     uint64_t dAlgoTimeMsg = (1000000000L * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec) / 1e6;
     printf("Test Accuracy: %d / %d = %2.2f%%\nRuntime: %llu ms\n", numRightGuess, numTestData,
            ((numRightGuess * 100.0) / numTestData), (long long unsigned int) dAlgoTimeMsg);
+
+    delete[] trainArray;
+    delete[] testArray;
+    delete[] nnWeightArray;
+    delete[] predictedArray;
+    delete[] originalClassArray;
 
     return 0;
 }
