@@ -129,6 +129,30 @@ DNN/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/build
 .PHONY : DNN/fast
 
+cuda.o: cuda.cpp.o
+.PHONY : cuda.o
+
+# target to build an object file
+cuda.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.o
+.PHONY : cuda.cpp.o
+
+cuda.i: cuda.cpp.i
+.PHONY : cuda.i
+
+# target to preprocess a source file
+cuda.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.i
+.PHONY : cuda.cpp.i
+
+cuda.s: cuda.cpp.s
+.PHONY : cuda.s
+
+# target to generate assembly for a file
+cuda.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/DNN.dir/build.make CMakeFiles/DNN.dir/cuda.cpp.s
+.PHONY : cuda.cpp.s
+
 main.o: main.cpp.o
 .PHONY : main.o
 
@@ -162,6 +186,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... DNN"
+	@echo "... cuda.o"
+	@echo "... cuda.i"
+	@echo "... cuda.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
