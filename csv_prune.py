@@ -1,6 +1,6 @@
 from itertools import islice
 
-PRUNE_SCALE = 500
+PRUNE_SCALE = 1500
 
 if __name__ == '__main__':
     csiPrunedFile = open('csi_pruned.csv', 'w')

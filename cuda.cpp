@@ -28,7 +28,7 @@
 // #define RAND_MX 1
 #define GEN_RAND ( (rand() % 10) / 10 )
 
-#define EPOCHS 500 // for debug: 10, for real: 10000+
+#define EPOCHS 10000 // for debug: 10, for real: 10000+
 #define LEARNING_RATE 0.0001    // e=500, lr=0.0001, Test Accuracy: 294 / 379 = 77.57%, loss=0.456487->0.438812
 
 #define TILE_DIM 32 // 9  // since 180 is a fixed known dim.
@@ -37,7 +37,7 @@
 using namespace std;
 
 // 270000 = 1500(data-instances) * [ 181 = 1(class) + 30(sub-carriers) * [ 3(transmitter-receiver pair) * [2(r & i)]]]
-float dataSet[270000];
+float dataSet[2285000];
 
 // REDUCE : CUDA
 __global__ void kernel_calcForwardLoss(float *result,
