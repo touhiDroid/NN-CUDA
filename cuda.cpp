@@ -65,39 +65,44 @@ __global__ void kernel_calcForwardLoss(float *result,
 }
 
 // TODO TILED : CUDA
-__global__ void kernel_matMultiply(float *A, float *B, float *C, int rowA, int colA, int rowB, int colB) {
-    float cellSum = 0;
+__global__ void kernel_matMultiplyTiled(float *A, float *B, float *C, int rowA, int colA, int rowB, int colB) {
+    int column = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
 
-    int currRow = blockIdx.y * TILE_DIM + threadIdx.y;
-    int currCol = blockIdx.x * TILE_DIM + threadIdx.x;
+    __shared__ float tile_A[TILE_DIM][TILE_DIM];
+    __shared__ float tile_B[TILE_DIM][TILE_DIM];
 
-    __shared__ float tileA[TILE_DIM][TILE_DIM];
-    __shared__ float tileB[TILE_DIM][TILE_DIM];
+    int tiles_iterations = (rowA + TILE_DIM - 1) / TILE_DIM;
 
-    int numIterationTiles = (colA + TILE_DIM - 1) / TILE_DIM;
-    for (int k = 0; k < numIterationTiles; k++) {
+    if (row < rowA && column < colB) {
 
-        if (k * TILE_DIM + threadIdx.x < colA && currRow < rowA)
-            tileA[threadIdx.y][threadIdx.x] = A[currRow * colA + k * TILE_DIM + threadIdx.x];
-        else
-            tileA[threadIdx.y][threadIdx.x] = 0.0;
+        float sum = 0;
 
-        if (k * TILE_DIM + threadIdx.y < rowB && currCol < colB)
-            tileB[threadIdx.y][threadIdx.x] = B[(k * TILE_DIM + threadIdx.y) * colB + currCol];
-        else
-            tileB[threadIdx.y][threadIdx.x] = 0.0;
+        for (int tile = 0; tile < tiles_iterations; tile++) {
+            tile_A[threadIdx.y][threadIdx.x] = A[colA * row + tile * TILE_DIM + threadIdx.x];
+            tile_B[threadIdx.y][threadIdx.x] = B[tile * TILE_DIM * colB + threadIdx.y * colB + column];
+            __syncthreads();
 
-        __syncthreads();
+            for (int k = 0; k < TILE_DIM; k++) {
+                sum += tile_A[threadIdx.y][k] * tile_B[k][threadIdx.x];
+            }
+            __syncthreads();
+        }
 
-        for (int n = 0; n < TILE_DIM; ++n)
-            cellSum += tileA[threadIdx.y][n] * tileB[n][threadIdx.x];
-
-        __syncthreads();
+        C[row * colB + column] = sum;
     }
+}
 
-    if (currRow < rowA && currCol < colB)
-        C[((blockIdx.y * blockDim.y + threadIdx.y) * colB) +
-          (blockIdx.x * blockDim.x) + threadIdx.x] = cellSum;
+__global__ void kernel_matMultiply(float *A, float *B, float *C, int rowA, int colA, int rowB, int colB) {
+    int row = (blockIdx.y * blockDim.y) + threadIdx.y;
+    int col = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+    if (row < rowA && col < colB) {
+        int sum = 0;
+        for (int k = 0; k < rowB; k++)
+            sum += A[row * colA + k] * B[k * colB + col];
+        C[row * rowA + col] = sum;
+    }
 }
 
 void matMultiply(const float *a, const float *b, float *answer, int r1, int c1, int r2, int c2) {
@@ -130,13 +135,7 @@ __global__ void kernel_matTranspose(float *oData, float *iData, int height, int 
         oData[yi * height + xi] = tile[threadIdx.x][threadIdx.y];
 }
 
-// TODO : Parallelize : CUDA
-/*void calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
-                      const int *originalOutArr, int startOffSetOriginalArr = 0) {
-    for (int i = 0; i < currArrSize; i++) {
-        deltaLoss[i] = (currOutArr[i] - ((float) originalOutArr[startOffSetOriginalArr + i])) / currArrSize;
-    }
-}*/
+// Parallelize : CUDA
 __global__ void kernel_calcBackwardLoss(float *deltaLoss, const float *currOutArr, int currArrSize,
                                         const int *originalOutArr) {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -144,16 +143,19 @@ __global__ void kernel_calcBackwardLoss(float *deltaLoss, const float *currOutAr
         deltaLoss[tid] = (currOutArr[tid] - ((float) originalOutArr[tid])) / currArrSize;
 }
 
-// TODO Parallelize : CUDA
-/*void updateWeightArray(float *w, const float *dw, int size) {
-    for (int i = 0; i < size; i++)
-        w[i] -= (dw[i] * LEARNING_RATE);
-}*/
+// Parallelize : CUDA
 __global__ void kernel_updateWeightArray(float *w, const float *dw, int size) {
     int tid = blockDim.x * blockIdx.x + threadIdx.x;
     if (tid < size)
         w[tid] = w[tid] - (dw[tid] * LEARNING_RATE);
 }
+
+// Parallelize Weight Initialization by CUDA
+/*__global__ void kernel_initWeightArray(float *w, int size) {
+    int tid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (tid < size)
+        w[tid] = GEN_RAND; // NOLINT(bugprone-integer-division)
+}*/
 
 int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *argv[]) {
     struct timespec begin, start, end;
@@ -245,7 +247,10 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
     size_t weightArrSize = 180 * sizeof(float);
     cudaMallocHost(&nnWeightArray, weightArrSize);
     cudaMalloc(&d_nnWeightArray, weightArrSize);
-    // TODO Parallelize via OpenMP / MPI / CUDA
+    // Parallelize via CUDA -> FAiled due to rand() not being available as a device function
+    // kernel_initWeightArray <<< blocksPerWtGrid, threadsPerBlock >>> (d_nnWeightArray, 180);
+    // cudaMemcpy(nnWeightArray, d_nnWeightArray, weightArrSize, cudaMemcpyDeviceToHost);
+#pragma omp parallel for num_threads(8)
     for (int i = 0; i < 180; i++)
         nnWeightArray[i] = GEN_RAND; // NOLINT(bugprone-integer-division)
     cudaMemcpy(d_nnWeightArray, nnWeightArray, weightArrSize, cudaMemcpyHostToDevice);
@@ -290,7 +295,7 @@ int main(__attribute__((unused)) int argc, __attribute__((unused)) const char *a
         kernel_calcForwardLoss<<< blocksPerGrid, threadsPerBlock >>>(d_lossTrain, d_predictedArray,
                                                                      d_originalClassArray, numTrainData);
         cudaMemcpy(lossTrain, d_lossTrain, sizeof(float), cudaMemcpyDeviceToHost);
-        printf("#%d: Loss = %f\n", e, *lossTrain);
+        // printf("#%d: Loss = %f\n", e, *lossTrain);
 
 
         // #2. Backward propagation:
